@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "profile": "Default",
+  "source_mode": "Local Folders",
+  "smb_host": "",
+  "smb_share": "",
+  "smb_username": "",
+  "smb_password": "",
+  "smb_domain": "",
+  "smb_mount_point": "",
+  "wrekked_library_path": "",
+  "wrk_storage_path": "",
+  "fastload_cache_path": "",
+  "temp_stem_cache_path": "",
+  "music_sources": [],
+  "backup_export_location": "",
+  "audio_backend": "cpal",
+  "sample_rate": 44100,
+  "buffer_size": 256,
+  "latency_preset": "Low Latency"
+}

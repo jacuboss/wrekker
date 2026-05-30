@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.wrekker.Wrekker</id>
+  <name>Wrekker</name>
+  <summary>Stem-native DJ software for Linux</summary>
+  <description>
+    <p>
+      Wrekker is a professional open source DJ software built around stem-native
+      mixing. Tracks are prepared into vocals, drums, bass and other layers for
+      real-time performance control.
+    </p>
+    <ul>
+      <li>Stem separation with HTDemucs</li>
+      <li>Beat This! beat tracking with fallback analysis</li>
+      <li>Phase-locked and phrase-locked sync</li>
+      <li>WREKK FX and WREKKER LAB preparation workflow</li>
+      <li>Native Pioneer DDJ-FLX4 support</li>
+      <li>Rust/CPAL real-time audio engine</li>
+    </ul>
+  </description>
+  <url type="homepage">https://github.com/wrekker-dj/wrekker</url>
+  <url type="bugtracker">https://github.com/wrekker-dj/wrekker/issues</url>
+  <launchable type="desktop-id">io.github.wrekker.Wrekker.desktop</launchable>
+  <releases>
+    <release version="0.1.0-beta" date="2026-05-29"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

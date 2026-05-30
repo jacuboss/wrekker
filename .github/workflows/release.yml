@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  check-secrets:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for sensitive data
+        run: python packaging/check-sensitive-data.py
+
+  build-appimage:
+    needs: check-secrets
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config librubberband-dev libfuse2 python3.11-dev ffmpeg wget
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pip install maturin
+      - name: Build AppImage
+        run: |
+          chmod +x packaging/appimage/build-appimage.sh
+          ./packaging/appimage/build-appimage.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: "Wrekker-*.AppImage"
+
+  build-windows:
+    needs: check-secrets
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: choco install nsis -y
+      - name: Build Windows installer
+        shell: powershell
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          ./packaging/windows/build-windows.ps1 -Version $version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: "Wrekker-Setup-*.exe"
+
+  build-flatpak:
+    needs: check-secrets
+    runs-on: ubuntu-22.04
+    container:
+      image: ghcr.io/flathub/flatpak-builder:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Flatpak
+        run: |
+          flatpak-builder --repo=repo --force-clean build-dir packaging/flatpak/io.github.wrekker.Wrekker.yml
+          flatpak build-bundle repo "Wrekker-${GITHUB_REF_NAME#v}.flatpak" io.github.wrekker.Wrekker
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: "Wrekker-*.flatpak"
+
+  release:
+    needs: [build-appimage, build-windows, build-flatpak]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "Wrekker ${{ github.ref_name }}"
+          body: |
+            ## Wrekker ${{ github.ref_name }}
+
+            Stem-native DJ software for Linux and Windows beta.
+
+            First launch downloads AI components once and caches them locally:
+            PyTorch CPU, HTDemucs and Beat This!.
+          files: |
+            appimage/Wrekker-*.AppImage
+            flatpak/Wrekker-*.flatpak
+            windows-installer/Wrekker-Setup-*.exe
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}

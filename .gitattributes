@@ -1,0 +1,17 @@
+# Force LF on checkout for all text files
+* text=auto eol=lf
+
+# Windows scripts get CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.nsi text eol=crlf
+
+# Binaries — no diff, no line-ending conversion
+*.so    binary
+*.pyd   binary
+*.dylib binary
+*.png   binary
+*.ico   binary
+*.whl   binary
+*.AppImage binary
+*.flatpak  binary

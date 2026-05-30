@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Wrekker
+Comment=Stem-native DJ software
+Exec=wrekker
+Icon=io.github.wrekker.Wrekker
+Type=Application
+Categories=AudioVideo;Audio;
+StartupNotify=true

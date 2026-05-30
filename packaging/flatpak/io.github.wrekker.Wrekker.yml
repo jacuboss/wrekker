@@ -1,0 +1,63 @@
+app-id: io.github.wrekker.Wrekker
+runtime: org.freedesktop.Platform
+runtime-version: "23.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm17
+command: wrekker
+
+finish-args:
+  - --socket=pulseaudio
+  - --device=all
+  - --filesystem=home
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --share=network
+
+modules:
+  - name: rubberband
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://breakfastquay.com/files/releases/rubberband-3.3.0.tar.bz2
+        sha256: "d9ef89e2b8ef9f85b13ac3c2faec30e20acf2c9f3a9c8c45ce637f2bc95e576c"
+
+  - name: python-deps
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app PyQt6 librosa soundfile numpy scipy sounddevice mutagen mido python-rtmidi structlog rich
+
+  - name: wrekker-engine
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+    build-commands:
+      - cd wrekker/engine_rs && maturin build --release --out /tmp/wheels
+      - pip3 install /tmp/wheels/wrekker_engine-*.whl --prefix=/app
+    sources:
+      - type: git
+        url: https://github.com/wrekker-dj/wrekker
+        tag: "v0.1.0-beta"
+
+  - name: wrekker
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app --no-deps .
+      - install -Dm644 packaging/flatpak/io.github.wrekker.Wrekker.desktop /app/share/applications/io.github.wrekker.Wrekker.desktop
+      - install -Dm644 packaging/flatpak/io.github.wrekker.Wrekker.appdata.xml /app/share/metainfo/io.github.wrekker.Wrekker.appdata.xml
+      - install -Dm644 wrekker/ui/assets/wrekker_logo.svg /app/share/icons/hicolor/scalable/apps/io.github.wrekker.Wrekker.svg
+    sources:
+      - type: git
+        url: https://github.com/wrekker-dj/wrekker
+        tag: "v0.1.0-beta"
+
+  - name: wrekker-launcher
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 packaging/flatpak/wrekker.sh /app/bin/wrekker
+    sources:
+      - type: git
+        url: https://github.com/wrekker-dj/wrekker
+        tag: "v0.1.0-beta"

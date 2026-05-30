@@ -1,0 +1,41 @@
+# Sensitive local config (never commit)
+wrekker/config/local_settings.json
+wrekker/config/local_override.json
+*.local.json
+
+# Python / test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Rust / maturin
+target/
+target.*/
+*.so
+*.pyd
+*.dylib
+
+# Build artifacts
+dist/
+build/
+*.AppImage
+*.flatpak
+Wrekker-Setup-*.exe
+Wrekker.AppDir/
+appimagetool-*.AppImage
+python-embed.zip
+rubberband-windows.zip
+rubberband-tmp/
+get-pip.py
+*.part
+
+# IDE / AI tooling
+.claude/
+.codex/
+.agents/
+.idea/
+.vscode/
