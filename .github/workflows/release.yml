@@ -36,43 +36,12 @@ jobs:
           name: appimage
           path: "Wrekker-*.AppImage"
 
-  build-windows:
-    needs: check-secrets
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - run: choco install nsis -y
-      - name: Build Windows installer
-        shell: powershell
-        run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          ./packaging/windows/build-windows.ps1 -Version $version
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: "Wrekker-Setup-*.exe"
-
-  build-flatpak:
-    needs: check-secrets
-    runs-on: ubuntu-22.04
-    container:
-      image: ghcr.io/flathub/flatpak-builder:latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Flatpak
-        run: |
-          flatpak-builder --repo=repo --force-clean build-dir packaging/flatpak/io.github.wrekker.Wrekker.yml
-          flatpak build-bundle repo "Wrekker-${GITHUB_REF_NAME#v}.flatpak" io.github.wrekker.Wrekker
-      - uses: actions/upload-artifact@v4
-        with:
-          name: flatpak
-          path: "Wrekker-*.flatpak"
+  # Windows and Flatpak builds are staged in packaging/ but not part of the
+  # release yet — they have never run in CI. Re-add their jobs here once they
+  # are verified so a broken build cannot block the AppImage release.
 
   release:
-    needs: [build-appimage, build-windows, build-flatpak]
+    needs: [build-appimage]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4
@@ -82,13 +51,18 @@ jobs:
           body: |
             ## Wrekker ${{ github.ref_name }}
 
-            Stem-native DJ software for Linux and Windows beta.
+            Stem-native DJ software for Linux.
+
+            **Download the AppImage below**, make it executable and run it:
+
+            ```
+            chmod +x Wrekker-*.AppImage
+            ./Wrekker-*.AppImage
+            ```
 
             First launch downloads AI components once and caches them locally:
             PyTorch CPU, HTDemucs and Beat This!.
           files: |
             appimage/Wrekker-*.AppImage
-            flatpak/Wrekker-*.flatpak
-            windows-installer/Wrekker-Setup-*.exe
           draft: false
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
