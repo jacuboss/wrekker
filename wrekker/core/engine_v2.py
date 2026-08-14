@@ -10,7 +10,9 @@ Differences from v1
 - No Python GIL acquisition in the hot path (biggest win).
 - Stem-gain fading uses a per-sample exponential smoother instead of the
   sin/cos equal-power ramp; audibly equivalent for DJ use.
-- Per-stem LUFS and spectral meters not yet implemented (returns −inf).
+- Per-stem loudness is real K-weighted BS.1770 (momentary + short-term),
+  measured post-gain/FX in the Rust callback. Per-stem spectral bands are
+  not measured (SpectralBands stays at −inf).
 - Waveform data stays Python-side (unaffected by this change).
 """
 from __future__ import annotations
@@ -304,16 +306,26 @@ class AudioEngine:
     def get_phase_correlation(self) -> float:
         return float(self._native.get_phase_correlation())
 
+    def get_master_lufs(self) -> tuple[float, float]:
+        """Master-bus K-weighted loudness → (momentary_LUFS, short_term_LUFS)."""
+        try:
+            m, st = self._native.get_master_lufs()
+            return float(m), float(st)
+        except AttributeError:
+            return _NEG_INF, _NEG_INF
+
     def get_deck_metrics(self, deck_id: str) -> Optional[DeckMetrics]:
         m  = float(self._native.get_lufs_momentary(deck_id))
         st = float(self._native.get_lufs_shortterm(deck_id))
         if math.isinf(m) and math.isinf(st):
             return None
 
+        pl, pr = self._native.get_peak_levels(deck_id)
+        peak = max(float(pl), float(pr))
         lufs = LoudnessMeasure(
             momentary_lufs  = m,
             short_term_lufs = st,
-            true_peak_dbfs  = st,
+            true_peak_dbfs  = 20.0 * math.log10(peak) if peak > 1e-6 else _NEG_INF,
         )
         spec_raw = tuple(float(x) for x in self._native.get_spectrum(deck_id))
         # Map 16-band raw to SpectralBands (sub/bass/mids/highs)
@@ -334,26 +346,27 @@ class AudioEngine:
         """Raw 16-band deck spectrum in dBFS."""
         return tuple(float(x) for x in self._native.get_spectrum(deck_id))
 
-    def get_stem_meters(
-        self, deck_id: str, stem_name: str,
-    ) -> tuple[LoudnessMeasure, SpectralBands]:
-        # Use per-stem peak as a proxy for loudness (no per-stem LUFS yet)
+    def get_stem_meters(self, deck_id: str, stem_name: str) -> LoudnessMeasure:
+        """Per-stem loudness. K-weighted BS.1770 momentary/short-term from the
+        Rust callback (post-gain/FX), plus the decayed sample peak in dBFS.
+
+        Per-stem spectral bands were never measured or displayed; that half of
+        the old (LoudnessMeasure, SpectralBands) return has been removed."""
         idx  = _STEM_INDEX.get(stem_name, 0)
         peak = float(self._native.get_stem_peak(deck_id, idx))
-        # Convert linear peak to approximate LUFS (rough approximation)
-        if peak > 1e-5:
-            m_lufs = 20.0 * math.log10(peak) - 3.0
-            tp_dbfs = 20.0 * math.log10(peak)
-        else:
-            m_lufs  = _NEG_INF
-            tp_dbfs = _NEG_INF
-        lufs = LoudnessMeasure(
+        tp_dbfs = 20.0 * math.log10(peak) if peak > 1e-5 else _NEG_INF
+        try:
+            m_lufs, st_lufs = self._native.get_stem_lufs(deck_id, idx)
+            m_lufs, st_lufs = float(m_lufs), float(st_lufs)
+        except AttributeError:
+            # Older native engine build — fall back to the peak approximation.
+            m_lufs = tp_dbfs - 3.0 if peak > 1e-5 else _NEG_INF
+            st_lufs = m_lufs
+        return LoudnessMeasure(
             momentary_lufs  = m_lufs,
-            short_term_lufs = m_lufs,
+            short_term_lufs = st_lufs,
             true_peak_dbfs  = tp_dbfs,
         )
-        spec = SpectralBands(sub=_NEG_INF, bass=_NEG_INF, mids=_NEG_INF, highs=_NEG_INF)
-        return lufs, spec
 
     def get_stem_peak(self, deck_id: str, stem_name: str) -> float:
         """Per-stem peak level (0.0–2.0 linear)."""

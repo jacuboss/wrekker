@@ -921,18 +921,17 @@ class MainWindow(QMainWindow):
                 result = {}
                 for stem in STEM_NAMES:
                     try:
-                        lufs, _ = self._engine.get_stem_meters(deck_id, stem)
+                        lufs = self._engine.get_stem_meters(deck_id, stem)
                         result[stem] = lufs.momentary_lufs
                     except Exception:
                         result[stem] = neg_inf
                 return result
 
-            if (_t0 - self._last_stem_lufs_t) >= 1.0:
-                self._stem_lufs_cache_a = _stem_lufs("A", state_a)
-                self._stem_lufs_cache_b = _stem_lufs("B", state_b)
-                self._last_stem_lufs_t = _t0
-            stem_lufs_a = self._stem_lufs_cache_a
-            stem_lufs_b = self._stem_lufs_cache_b
+            # Native per-stem LUFS is a handful of atomic reads — poll at the
+            # heavy-path rate (~10 Hz) so the stem meters move like meters.
+            stem_lufs_a = self._stem_lufs_cache_a = _stem_lufs("A", state_a)
+            stem_lufs_b = self._stem_lufs_cache_b = _stem_lufs("B", state_b)
+            self._last_stem_lufs_t = _t0
 
             # Stem gains → waveform overlay
             if state_a and state_a.stems:
@@ -946,6 +945,18 @@ class MainWindow(QMainWindow):
             self._deck_a.update_state(state_a, pos_a, metrics_a, stem_lufs_a)
             self._deck_b.update_state(state_b, pos_b, metrics_b, stem_lufs_b)
             self._master.update_states(phase, state_a, state_b)
+
+            # Master loudness + pre-fader A/B loudness delta (gain staging)
+            try:
+                mst_m, mst_st = self._engine.get_master_lufs()
+                mpl, mpr = self._engine.get_master_peak()
+                mpk = max(float(mpl), float(mpr))
+                mst_tp = 20.0 * math.log10(mpk) if mpk > 1e-6 else float("-inf")
+                st_a = metrics_a.lufs.short_term_lufs if metrics_a else float("-inf")
+                st_b = metrics_b.lufs.short_term_lufs if metrics_b else float("-inf")
+                self._master.update_loudness(mst_m, mst_st, mst_tp, st_a, st_b)
+            except Exception:
+                pass
 
             if self._flx4 is not None and hasattr(self._flx4, "sync_leds"):
                 self._flx4.sync_leds()

@@ -188,29 +188,34 @@ class DeckStatus(str, Enum):
 
 # ─── harmonic key (Camelot wheel) ─────────────────────────────────────────────
 
-# Camelot wheel: number 1-12, mode A=minor / B=major
-_CAMELOT_FROM_KEY: dict[str, tuple[int, str]] = {
-    # --- minor keys (mode A) ---
-    "Am": (1, "A"),  "Em": (2, "A"),  "Bm": (3, "A"),
-    "F#m":(4, "A"),  "Gbm":(4, "A"),  "C#m":(5, "A"),
-    "Dbm":(5, "A"),  "G#m":(6, "A"),  "Abm":(6, "A"),
-    "D#m":(7, "A"),  "Ebm":(7, "A"),  "A#m":(8, "A"),
-    "Bbm":(8, "A"),  "Fm": (9, "A"),  "Cm": (10,"A"),
-    "Gm": (11,"A"),  "Dm": (12,"A"),
-    # --- major keys (mode B) ---
-    "C":  (1, "B"),  "G":  (2, "B"),  "D":  (3, "B"),
-    "A":  (4, "B"),  "E":  (5, "B"),  "B":  (6, "B"),
-    "F#": (7, "B"),  "Gb": (7, "B"),  "C#": (8, "B"),
-    "Db": (8, "B"),  "G#": (9, "B"),  "Ab": (9, "B"),
-    "D#": (10,"B"),  "Eb": (10,"B"),  "A#": (11,"B"),
-    "Bb": (11,"B"),  "F":  (12,"B"),
+# Camelot wheel: number 1-12, mode A=minor / B=major.
+# Standard Camelot assignments (8A=Am, 8B=C) so keys match Rekordbox /
+# Mixed In Key.  (number, mode) → canonical name first, then enharmonics.
+_KEY_FROM_CAMELOT: dict[tuple[int, str], str] = {
+    (1, "A"): "Abm",  (1, "B"): "B",
+    (2, "A"): "Ebm",  (2, "B"): "F#",
+    (3, "A"): "Bbm",  (3, "B"): "Db",
+    (4, "A"): "Fm",   (4, "B"): "Ab",
+    (5, "A"): "Cm",   (5, "B"): "Eb",
+    (6, "A"): "Gm",   (6, "B"): "Bb",
+    (7, "A"): "Dm",   (7, "B"): "F",
+    (8, "A"): "Am",   (8, "B"): "C",
+    (9, "A"): "Em",   (9, "B"): "G",
+    (10,"A"): "Bm",   (10,"B"): "D",
+    (11,"A"): "F#m",  (11,"B"): "A",
+    (12,"A"): "C#m",  (12,"B"): "E",
 }
 
-# Reverse mapping: (number, mode) → canonical key name
-_KEY_FROM_CAMELOT: dict[tuple[int, str], str] = {
-    v: k for k, v in _CAMELOT_FROM_KEY.items()
-    if k not in {"Gbm","C#m","G#m","D#m","A#m","Gb","C#","G#","D#","A#"}
+_CAMELOT_FROM_KEY: dict[str, tuple[int, str]] = {
+    name: camelot for camelot, name in _KEY_FROM_CAMELOT.items()
 }
+_CAMELOT_FROM_KEY.update({
+    # enharmonic aliases
+    "G#m": (1, "A"),  "D#m": (2, "A"),  "A#m": (3, "A"),
+    "Gbm": (11,"A"),  "Dbm": (12,"A"),
+    "Gb":  (2, "B"),  "C#":  (3, "B"),  "G#":  (4, "B"),
+    "D#":  (5, "B"),  "A#":  (6, "B"),
+})
 
 
 @dataclass(frozen=True)

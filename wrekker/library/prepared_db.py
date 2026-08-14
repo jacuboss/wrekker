@@ -334,6 +334,9 @@ class PreparedDB:
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self._path, timeout=10)
         con.row_factory = sqlite3.Row
+        # foreign_keys is per-connection in SQLite; without it the
+        # ON DELETE CASCADE on prepared_set_tracks never fires.
+        con.execute("PRAGMA foreign_keys = ON")
         return con
 
     _MIGRATIONS = [
@@ -363,6 +366,15 @@ class PreparedDB:
                     con.execute(stmt)
                 except Exception:
                     pass   # column already exists
+            # Repair orphans left behind by connections that ran without
+            # foreign_keys=ON (set deletions did not cascade).
+            try:
+                con.execute("""
+                    DELETE FROM prepared_set_tracks
+                    WHERE set_id NOT IN (SELECT id FROM prepared_sets)
+                """)
+            except Exception:
+                pass
 
     # ── Track management (source-path-first) ───────────────────────────────────
 
@@ -898,15 +910,28 @@ class PreparedDB:
             con.execute("DELETE FROM prepared_sets WHERE id = ?", (set_id,))
 
     def create_wrekked_set(self, name: str, description: str = "") -> int:
-        """Create a brand-new set with the given name.  Returns the new id."""
+        """
+        Create a brand-new set.  Returns the new id.
+
+        Set names are UNIQUE; if the requested name is taken, a numeric
+        suffix is appended ("Name (2)", "Name (3)", …) instead of raising.
+        """
         now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         with self._connect() as con:
+            final_name = name
+            for n in range(2, 1000):
+                exists = con.execute(
+                    "SELECT 1 FROM prepared_sets WHERE name = ?", (final_name,)
+                ).fetchone()
+                if not exists:
+                    break
+                final_name = f"{name} ({n})"
             con.execute(
                 "INSERT INTO prepared_sets (name, description, updated_at) VALUES (?,?,?)",
-                (name, description or None, now),
+                (final_name, description or None, now),
             )
             row = con.execute(
-                "SELECT id FROM prepared_sets WHERE name = ?", (name,)
+                "SELECT id FROM prepared_sets WHERE name = ?", (final_name,)
             ).fetchone()
         return row["id"]
 

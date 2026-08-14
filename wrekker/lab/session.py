@@ -388,14 +388,13 @@ class LabEditSession:
         ))
 
     def set_first_beat(self, position_s: float, reason: str = "") -> None:
-        self._snapshot()
         bg = self.draft.active_beatgrid
         before = {"first_beat_s": first_beat(bg)}
         old_first = first_beat(bg)
         if old_first is None:
             old_first = 0.0
+        # shift_grid snapshots and records; this stays a single undo step.
         self.shift_grid(float(position_s) - float(old_first), reason=reason)
-        # shift_grid already snapshotted and recorded; collapse extra snapshot is acceptable.
         self._changes[-1].operation = "set_first_beat"
         self._changes[-1].before = before
         self._changes[-1].after = {"first_beat_s": first_beat(bg)}
@@ -412,25 +411,47 @@ class LabEditSession:
             start = anchor
         period = 60.0 / bpm
         first = anchor - round((anchor - start) / period) * period
-        while first > 0.0:
-            first -= period
-        while first + period < 0.0:
-            first += period
+        # Earliest non-negative beat that keeps the anchor exactly on-grid.
+        t = first % period
         beats = []
-        t = max(0.0, first)
-        # If first is before zero, find first non-negative beat.
-        while t < 0.0:
-            t += period
         while t <= duration + period:
             beats.append(round(t, 6))
             t += period
         bg["bpm"] = round(bpm, 6)
         bg["bpm_variable"] = False
         _set_beats(bg, beats)
+        self._realign_bars_to_grid(bg, anchor, period, duration)
         self._record(AnalysisChange(
             "beatgrid", "set_bpm", before,
             {"bpm": bpm, "first_beat_s": first_beat(bg)}, reason,
         ))
+
+    def _realign_bars_to_grid(self, bg: dict, anchor: float, period: float, duration: float) -> None:
+        """Regenerate downbeats/phrases on the new beat grid after a BPM change.
+
+        The old bar structure keeps its musical position: the downbeat nearest
+        the anchor is snapped onto the new grid and bars/phrases are rebuilt
+        from there, so they never sit between beats of the new grid.
+        """
+        old_downbeats = _downbeats(bg)
+        if not old_downbeats:
+            return
+        t0 = _beats_from_grid(bg)[0] if _beats_from_grid(bg) else 0.0
+        ref = min(old_downbeats, key=lambda d: abs(d - anchor))
+        new_ref = t0 + round((ref - t0) / period) * period
+        bar_period = period * 4.0
+        d = new_ref
+        while d - bar_period >= 0.0:
+            d -= bar_period
+        downbeats = []
+        while d <= duration + bar_period:
+            downbeats.append(round(max(0.0, d), 6))
+            d += bar_period
+        bg["downbeats"] = downbeats
+        phrases = _phrase_markers(bg)
+        if phrases:
+            bars = int(phrases[0].get("phrase_length") or 16)
+            self.regenerate_phrases_from_downbeat(new_ref, phrase_bars=bars, snapshot=False)
 
     def multiply_bpm(self, factor: float) -> None:
         old = _grid_bpm(self.draft.active_beatgrid)
@@ -1056,8 +1077,8 @@ def nearest_transient_from_energy(stem_energy, position_s: float, duration_s: fl
         stem = arr[:, stem_index].astype(float)
         onset = np.maximum(0.0, stem[1:] - stem[:-1])
         local = onset[lo:hi]
-        if local.size == 0:
-            return None
+        if local.size == 0 or float(local.max()) <= 1e-9:
+            return None   # silent/flat window — no real transient to snap to
         idx = int(np.argmax(local)) + lo
         return round(idx * col_s, 6)
     except Exception:

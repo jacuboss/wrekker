@@ -62,75 +62,97 @@ fn k_weighting_coeffs(sr: f32) -> ([f32; 3], [f32; 2], [f32; 3], [f32; 2]) {
     (pre_b, pre_a, rlb_b, rlb_a)
 }
 
-struct BlockRingBuffer {
-    buf: Vec<f32>,
+const N_BINS: usize = 30;         // 30 × 100 ms = 3 s short-term window
+const MOMENTARY_BINS: usize = 4;  //  4 × 100 ms = 400 ms momentary window
+
+/// Sliding mean-square over fixed 100 ms bins counted in *frames*, so the
+/// window durations hold regardless of the host's callback size (PipeWire
+/// quanta routinely differ from the requested blocksize).
+struct MsRing {
+    sums: [f64; N_BINS],
+    counts: [u32; N_BINS],
     head: usize,
-    sum: f64,
-    fill: usize,
+    filled: usize,
+    cur_sum: f64,
+    cur_n: u32,
+    bin_frames: u32,
 }
 
-impl BlockRingBuffer {
-    fn new(capacity: usize) -> Self {
+impl MsRing {
+    fn new(sr: u32) -> Self {
         Self {
-            buf: vec![0.0; capacity.max(1)],
+            sums: [0.0; N_BINS],
+            counts: [0; N_BINS],
             head: 0,
-            sum: 0.0,
-            fill: 0,
+            filled: 0,
+            cur_sum: 0.0,
+            cur_n: 0,
+            bin_frames: (sr / 10).max(1),
         }
     }
 
-    fn push(&mut self, val: f32) {
-        self.sum -= self.buf[self.head] as f64;
-        self.buf[self.head] = val;
-        self.sum += val as f64;
-        self.head = (self.head + 1) % self.buf.len();
-        if self.fill < self.buf.len() {
-            self.fill += 1;
+    #[inline(always)]
+    fn push(&mut self, ms: f32) {
+        self.cur_sum += ms as f64;
+        self.cur_n += 1;
+        if self.cur_n >= self.bin_frames {
+            self.sums[self.head] = self.cur_sum;
+            self.counts[self.head] = self.cur_n;
+            self.head = (self.head + 1) % N_BINS;
+            if self.filled < N_BINS {
+                self.filled += 1;
+            }
+            self.cur_sum = 0.0;
+            self.cur_n = 0;
         }
     }
 
-    fn mean(&self) -> f64 {
-        if self.fill == 0 {
+    /// Mean square over the newest `k` complete bins plus the partial bin.
+    fn mean_last(&self, k: usize) -> f64 {
+        let mut sum = self.cur_sum;
+        let mut n = self.cur_n as u64;
+        let take = k.min(self.filled);
+        for i in 0..take {
+            let idx = (self.head + N_BINS - 1 - i) % N_BINS;
+            sum += self.sums[idx];
+            n += self.counts[idx] as u64;
+        }
+        if n == 0 {
             0.0
         } else {
-            self.sum / self.fill as f64
+            sum / n as f64
         }
     }
 
     fn reset(&mut self) {
-        self.buf.fill(0.0);
+        self.sums = [0.0; N_BINS];
+        self.counts = [0; N_BINS];
         self.head = 0;
-        self.sum = 0.0;
-        self.fill = 0;
+        self.filled = 0;
+        self.cur_sum = 0.0;
+        self.cur_n = 0;
     }
 }
 
 pub struct KWeightedLUFS {
     pre: Biquad,
     rlb: Biquad,
-    /// One block mean-square per ring-buffer slot
-    momentary: BlockRingBuffer, // 400 ms ÷ block_dur blocks
-    shortterm: BlockRingBuffer, // 3 s ÷ block_dur blocks
+    ring: MsRing,
 }
 
 impl KWeightedLUFS {
-    pub fn new(sr: u32, blocksize: usize) -> Self {
+    pub fn new(sr: u32, _blocksize: usize) -> Self {
         let (pre_b, pre_a, rlb_b, rlb_a) = k_weighting_coeffs(sr as f32);
-        let callbacks_per_s = sr as f64 / blocksize.max(1) as f64;
-        let m_cap = ((0.4 * callbacks_per_s) as usize).max(1);
-        let s_cap = ((3.0 * callbacks_per_s) as usize).max(1);
         Self {
             pre: Biquad::new(pre_b, pre_a),
             rlb: Biquad::new(rlb_b, rlb_a),
-            momentary: BlockRingBuffer::new(m_cap),
-            shortterm: BlockRingBuffer::new(s_cap),
+            ring: MsRing::new(sr),
         }
     }
 
     /// Process one interleaved stereo block; returns (momentary_LUFS, short_term_LUFS).
     pub fn process(&mut self, buf: &[f32]) -> (f32, f32) {
         let n = buf.len() / 2;
-        let mut block_ms = 0.0_f32;
 
         for i in 0..n {
             let mut ms = 0.0_f32;
@@ -140,12 +162,10 @@ impl KWeightedLUFS {
                 let y2 = self.rlb.step(y1, ch);
                 ms += y2 * y2;
             }
-            block_ms += ms * 0.5;
+            // BS.1770-4 §4: stereo loudness sums the per-channel mean squares
+            // (G = 1.0 for L/R); averaging here would read 3 dB low.
+            self.ring.push(ms);
         }
-        block_ms /= n.max(1) as f32;
-
-        self.momentary.push(block_ms);
-        self.shortterm.push(block_ms);
 
         fn to_lufs(ms: f64) -> f32 {
             if ms < 1e-10 {
@@ -156,15 +176,14 @@ impl KWeightedLUFS {
         }
 
         (
-            to_lufs(self.momentary.mean()),
-            to_lufs(self.shortterm.mean()),
+            to_lufs(self.ring.mean_last(MOMENTARY_BINS)),
+            to_lufs(self.ring.mean_last(N_BINS)),
         )
     }
 
     pub fn reset(&mut self) {
         self.pre.reset();
         self.rlb.reset();
-        self.momentary.reset();
-        self.shortterm.reset();
+        self.ring.reset();
     }
 }

@@ -23,6 +23,9 @@ dependencies = [
     "scipy>=1.10",
 ]
 
+[project.scripts]
+wrekker = "wrekker.ui.app:main"
+
 [project.optional-dependencies]
 ai = [
     "demucs>=4.0.0",

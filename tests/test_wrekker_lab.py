@@ -180,6 +180,58 @@ def test_lab_filters_low_confidence_auto_markers_but_retains_locked_manual(tmp_p
     assert state.corrections["filtered_low_confidence_auto_markers"] == 1
 
 
+def test_lab_set_bpm_preserves_anchor_phase_and_realigns_bars(tmp_path: Path) -> None:
+    wrk = tmp_path / "track.wrk"
+    _make_wrk(wrk)
+    session = begin_lab_session(wrk)
+
+    anchor = 10.5
+    session.set_bpm(124.0, anchor_s=anchor, reason="test")
+
+    bg = session.draft.active_beatgrid
+    period = 60.0 / 124.0
+    beats = bg["beats"]
+    # The anchor position must land exactly on the new grid.
+    assert min(abs(b - anchor) for b in beats) < 1e-3
+    # The first beat keeps the anchor's phase instead of collapsing to 0.0.
+    assert 0.0 <= beats[0] < period
+    assert abs((anchor - beats[0]) % period) < 1e-3 or abs((anchor - beats[0]) % period - period) < 1e-3
+    # Downbeats were rebuilt on the new grid: bar-spaced and beat-aligned.
+    downbeats = bg["downbeats"]
+    assert downbeats
+    assert abs((downbeats[1] - downbeats[0]) - 4 * period) < 1e-6
+    assert min(abs(downbeats[0] - b) for b in beats) < 1e-6
+    # Phrases were regenerated with the original phrase length.
+    assert bg["phrase_markers"]
+    assert bg["phrase_markers"][0]["phrase_length"] == 16
+
+
+def test_lab_set_first_beat_is_a_single_undo_step(tmp_path: Path) -> None:
+    wrk = tmp_path / "track.wrk"
+    _make_wrk(wrk)
+    session = begin_lab_session(wrk)
+    original = list(session.draft.active_beatgrid["beats"])
+
+    session.set_first_beat(1.0)
+    assert session.draft.active_beatgrid["beats"][0] != original[0]
+
+    assert session.undo()
+    assert session.draft.active_beatgrid["beats"] == original
+    assert not session._undo   # no stale duplicate snapshot left behind
+
+
+def test_lab_transient_snap_rejects_silent_energy() -> None:
+    import numpy as np
+    from wrekker.lab.session import nearest_transient_from_energy
+
+    assert nearest_transient_from_energy(np.zeros((200, 4)), 5.0, 10.0) is None
+    energy = np.zeros((200, 4))
+    energy[100, 1] = 1.0   # one drum transient at 5.0s of a 10s track
+    pos = nearest_transient_from_energy(energy, 4.95, 10.0)
+    assert pos is not None
+    assert abs(pos - 5.0) < 0.1
+
+
 def test_lab_marker_taxonomy_maps_friendly_labels_to_internal_types() -> None:
     assert marker_type_from_ui("WREKK", "VOCAL", "OUT") == "vocal_out"
     assert marker_type_from_ui("WREKK", "BASS", "OUT") == "bass_out"

@@ -1,7 +1,7 @@
 !define APP_NAME "Wrekker"
 !define APP_VERSION "${VERSION}"
 !define APP_PUBLISHER "Wrekker"
-!define APP_URL "https://github.com/wrekker-dj/wrekker"
+!define APP_URL "https://github.com/jacuboss/wrekker"
 
 Name "${APP_NAME} ${APP_VERSION}"
 OutFile "Wrekker-Setup-${APP_VERSION}-x64.exe"

@@ -220,8 +220,11 @@ class LibraryScanner:
         if batch:
             self._db.upsert_many(batch)
 
-        # Remove tracks whose files disappeared
-        self._db.remove_missing(root)
+        # Remove tracks whose files disappeared.  Skip when the walk found
+        # nothing but the DB knows tracks under this root — that pattern means
+        # the root is an unmounted share, not a genuinely emptied library.
+        if audio_files or not known:
+            self._db.remove_missing(root)
 
         progress.done = True
         yield progress

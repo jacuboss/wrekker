@@ -448,6 +448,8 @@ class WrekkedWidget(QWidget):
     _marker_status_ready = pyqtSignal(object)   # dict[str, str]
     _lab_status_ready = pyqtSignal(object)      # dict[str, dict]
     _library_scan_done = pyqtSignal(object, object) # ScanProgress|None, duplicate groups
+    _bg_status       = pyqtSignal(str)          # progress text from worker threads
+    _bg_reload       = pyqtSignal()             # worker finished → reload tracks
 
     def __init__(
         self,
@@ -476,6 +478,8 @@ class WrekkedWidget(QWidget):
         self._marker_status_ready.connect(self._on_marker_status_ready)
         self._lab_status_ready.connect(self._on_lab_status_ready)
         self._library_scan_done.connect(self._on_library_scan_done)
+        self._bg_status.connect(lambda text: self._count_lbl.setText(text))
+        self._bg_reload.connect(self._load_tracks)
 
         self._build_ui()
         self._refresh_sets()
@@ -649,6 +653,8 @@ class WrekkedWidget(QWidget):
 
     def _refresh_sets(self) -> None:
         self._sets = self._db.list_wrekked_sets()
+        current = self._set_list.currentItem()
+        prev_data = current.data(Qt.ItemDataRole.UserRole) if current else None
         self._set_list.blockSignals(True)
         self._set_list.clear()
 
@@ -716,6 +722,14 @@ class WrekkedWidget(QWidget):
                         item.setForeground(QColor(theme.STATUS_WARN))
                         self._set_list.addItem(item)
 
+        # Restore the previous selection silently (collapsing a section must
+        # not jump the view to "All Prepared"); fall back to the first row.
+        if prev_data not in (None, _SECTION_SETS, _SECTION_LIBRARY):
+            for row in range(self._set_list.count()):
+                if self._set_list.item(row).data(Qt.ItemDataRole.UserRole) == prev_data:
+                    self._set_list.setCurrentRow(row)
+                    self._set_list.blockSignals(False)
+                    return
         self._set_list.blockSignals(False)
         self._select_first_content_row()
 
@@ -1666,17 +1680,17 @@ class WrekkedWidget(QWidget):
         tracks = self._db.list_tracks_in_wrekked_set(set_id)
         def _worker():
             ok = skipped = failed = size = 0
-            try:
-                from wrekker.formats.fastload import FastloadCache, FORMAT_PCM16
-                from wrekker.formats.wrk import load_wrk_metadata, load_wrk_mix
-                cache = FastloadCache()
-                total = len(tracks)
-                for i, t in enumerate(tracks, 1):
-                    self._count_lbl.setText(f"Fastload {i}/{total} · ok {ok} skip {skipped} fail {failed}")
-                    p = Path(t.wrk_path)
-                    if not t.wrk_ready or not p.exists():
-                        skipped += 1
-                        continue
+            from wrekker.formats.fastload import FastloadCache, FORMAT_PCM16
+            from wrekker.formats.wrk import load_wrk_metadata, load_wrk_mix
+            cache = FastloadCache()
+            total = len(tracks)
+            for i, t in enumerate(tracks, 1):
+                self._bg_status.emit(f"Fastload {i}/{total} · ok {ok} skip {skipped} fail {failed}")
+                p = Path(t.wrk_path)
+                if not t.wrk_ready or not p.exists():
+                    skipped += 1
+                    continue
+                try:
                     if rebuild:
                         cache.invalidate(p)
                     elif cache.is_valid(p):
@@ -1688,10 +1702,10 @@ class WrekkedWidget(QWidget):
                     cache.build(p, meta, audio, sr, stems_raw=None, audio_format=FORMAT_PCM16)
                     size += max(0, cache.entry_size_bytes(p) - before)
                     ok += 1
-            except Exception:
-                failed += 1
-            self._count_lbl.setText(f"Fastload done · {ok} success · {skipped} skipped · {failed} failed")
-            QTimer.singleShot(0, self._load_tracks)
+                except Exception:
+                    failed += 1
+            self._bg_status.emit(f"Fastload done · {ok} success · {skipped} skipped · {failed} failed")
+            self._bg_reload.emit()
         threading.Thread(target=_worker, daemon=True, name="wrekked-set-fastload").start()
 
     def _delete_fastload_for_set(self, set_id: int) -> None:

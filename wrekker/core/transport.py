@@ -371,8 +371,11 @@ def _make_beatgrid(bg: "dict | None") -> "BeatGrid | None":
         if isinstance(p, dict)
     )
     schema_version = int(bg.get("schema_version", bg.get("beatgrid_version", 1)) or 1)
+    bpm = bg.get("bpm")
+    if not bpm or bpm <= 0:
+        return None
     return BeatGrid(
-        bpm           = bg["bpm"],
+        bpm           = bpm,
         first_beat_s  = bg.get("first_beat_s", 0.0),
         confidence    = bg.get("confidence", 0.5),
         source        = bg.get("source", "analyzed"),
@@ -960,7 +963,7 @@ class Transport:
         pb.waveform = WaveformData(
             peaks       = meta.waveform_peaks,
             colors      = meta.waveform_colors,
-            beats       = tuple(meta.beatgrid["beats"]) if meta.beatgrid else (),
+            beats       = tuple(meta.beatgrid.get("beats") or ()) if meta.beatgrid else (),
             stem_energy = meta.stem_energy if meta.has_stems else None,
             stem_horizon = getattr(meta, "stem_horizon", None) if meta.has_stems else None,
             zoom_peaks  = None,
@@ -1009,7 +1012,7 @@ class Transport:
         pb.waveform = WaveformData(
             peaks       = meta.waveform_peaks,
             colors      = meta.waveform_colors,
-            beats       = tuple(meta.beatgrid["beats"]) if meta.beatgrid else (),
+            beats       = tuple(meta.beatgrid.get("beats") or ()) if meta.beatgrid else (),
             stem_energy = meta.stem_energy if meta.has_stems else None,
             stem_horizon = getattr(meta, "stem_horizon", None) if meta.has_stems else None,
             zoom_peaks  = z_peaks,
@@ -2324,7 +2327,7 @@ class Transport:
         deck_id:     DeckID,
         status:      DeckStatus,
         *,
-        track:        Optional[TrackInfo]  = None,
+        track:        object               = _UNSET,
         position_s:   Optional[float]      = None,
         pitch_pct:    Optional[float]      = None,
         bpm_live:     Optional[float]      = None,
@@ -2339,7 +2342,7 @@ class Transport:
         dl.state = DeckState(
             id           = deck_id,
             status       = status,
-            track        = track        if track        is not None else old.track,
+            track        = track        if track     is not _UNSET else old.track,
             position_s   = position_s   if position_s   is not None else old.position_s,
             pitch_pct    = pitch_pct    if pitch_pct    is not None else old.pitch_pct,
             bpm_live     = bpm_live     if bpm_live     is not None else old.bpm_live,

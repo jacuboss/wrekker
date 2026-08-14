@@ -65,7 +65,14 @@ def library_dir() -> Path:
 
 
 def fastload_dir() -> Path:
-    p = data_dir() / "fastload"
+    # Must match the SettingsStore default (storage.fastload_cache_root) and
+    # the documented location; a data-dir default here silently created a
+    # second cache tree whenever the env override was not applied.
+    p = cache_dir() / "fastload"
+    if not p.exists():
+        legacy = data_dir() / "fastload"
+        if legacy.is_dir() and any(legacy.iterdir()):
+            return legacy   # keep using an existing populated legacy cache
     return _ensure_dir(p)
 
 

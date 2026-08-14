@@ -205,6 +205,19 @@ class MasterWidget(QWidget):
         phase_row.addWidget(self._phase_val)
         root.addLayout(phase_row)
 
+        # ── Master loudness (K-weighted) ─────────────────────────────────────
+        loud_row = QHBoxLayout()
+        loud_row.setSpacing(6)
+        loud_lbl = _section_lbl("LOUD")
+        loud_lbl.setFixedWidth(40)
+        loud_row.addWidget(loud_lbl)
+        self._loud_val = QLabel("—")
+        self._loud_val.setStyleSheet(
+            f"color: {theme.TEXT_MED}; font-size: 10px; font-family: monospace;"
+        )
+        loud_row.addWidget(self._loud_val, stretch=1)
+        root.addLayout(loud_row)
+
         # ── Key compatibility ─────────────────────────────────────────────────
         key_row = QHBoxLayout()
         key_lbl = _section_lbl("KEY")
@@ -299,6 +312,18 @@ class MasterWidget(QWidget):
         xf_row.addWidget(self._crossfader, stretch=1)
         xf_row.addWidget(b_lbl)
         root.addLayout(xf_row)
+
+        # ── Pre-fader loudness delta A/B (trim matching) ─────────────────────
+        self._loud_delta = QLabel("")
+        self._loud_delta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._loud_delta.setToolTip(
+            "Pre-fader short-term loudness difference between the decks.\n"
+            "Match with the TRIM knobs so both tracks mix at equal loudness."
+        )
+        self._loud_delta.setStyleSheet(
+            f"color: {theme.TEXT_DIM}; font-size: 9px; font-weight: 700; font-family: monospace;"
+        )
+        root.addWidget(self._loud_delta)
 
         root.addWidget(_sep())
 
@@ -538,6 +563,52 @@ class MasterWidget(QWidget):
                 f"font-size: 16px; font-weight: 800; color: {theme.TEXT_MED};"
             )
             self._key_detail.setText("")
+
+    def update_loudness(
+        self,
+        master_m:  float,
+        master_st: float,
+        master_tp: float,
+        deck_a_st: float,
+        deck_b_st: float,
+    ) -> None:
+        """Master LUFS/TP readout + pre-fader deck loudness delta."""
+        if math.isinf(master_st) and math.isinf(master_m):
+            self._loud_val.setText("—")
+            self._loud_val.setStyleSheet(
+                f"color: {theme.TEXT_DIM}; font-size: 10px; font-family: monospace;"
+            )
+        else:
+            m_txt  = f"{master_m:.1f}"  if not math.isinf(master_m)  else "—"
+            st_txt = f"{master_st:.1f}" if not math.isinf(master_st) else "—"
+            tp_txt = f"{master_tp:+.1f}" if not math.isinf(master_tp) else "—"
+            # Warn from the short-term level: sustained loudness is what cooks a PA
+            if master_st > -8.0 or master_tp > -1.0:
+                col = theme.STATUS_ERR
+            elif master_st > -12.0:
+                col = theme.STATUS_WARN
+            else:
+                col = theme.TEXT_BRIGHT
+            self._loud_val.setText(f"M {m_txt}  S {st_txt} LUFS   TP {tp_txt} dB")
+            self._loud_val.setStyleSheet(
+                f"color: {col}; font-size: 10px; font-family: monospace;"
+            )
+
+        if math.isinf(deck_a_st) or math.isinf(deck_b_st):
+            self._loud_delta.setText("")
+            return
+        delta = deck_b_st - deck_a_st
+        if abs(delta) < 0.5:
+            text = f"A ≈ B  (Δ {abs(delta):.1f} LU)"
+            col = theme.STATUS_OK
+        else:
+            louder = "B" if delta > 0 else "A"
+            text = f"{louder} +{abs(delta):.1f} LU louder — match trim"
+            col = theme.STATUS_WARN if abs(delta) < 3.0 else theme.STATUS_ERR
+        self._loud_delta.setText(text)
+        self._loud_delta.setStyleSheet(
+            f"color: {col}; font-size: 9px; font-weight: 700; font-family: monospace;"
+        )
 
     def update_levels(
         self,

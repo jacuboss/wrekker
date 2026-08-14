@@ -353,6 +353,10 @@ pub struct DeckAudioState {
 
     smoothers: [StemSmoother; N_STEMS],
     lufs: KWeightedLUFS,
+    /// Per-stem K-weighted loudness, fed from post-gain/FX stem samples.
+    stem_lufs: [KWeightedLUFS; N_STEMS],
+    /// Per-stem interleaved-stereo scratch for the current block (preallocated).
+    stem_block: [Vec<f32>; N_STEMS],
     spec_accum: SpectrumAccum,
     scratch: ScratchEngine,
     nudge: NudgeEngine,
@@ -372,6 +376,9 @@ impl DeckAudioState {
             pos_f: 0.0,
             smoothers: std::array::from_fn(|_| StemSmoother::new(0.15, fs)),
             lufs: KWeightedLUFS::new(sr, 256),
+            stem_lufs: std::array::from_fn(|_| KWeightedLUFS::new(sr, 256)),
+            // Sized for the largest realistic callback; push never allocates.
+            stem_block: std::array::from_fn(|_| Vec::with_capacity(8192 * 2)),
             spec_accum: SpectrumAccum::new(fs),
             scratch: ScratchEngine::new(fs),
             nudge: NudgeEngine::new(fs),
@@ -396,6 +403,9 @@ impl DeckAudioState {
                         self.lufs.reset();
                         for (i, sm) in self.smoothers.iter_mut().enumerate() {
                             sm.reset(self.shared.stem_targets[i].load(Relaxed));
+                            self.stem_lufs[i].reset();
+                            self.shared.stem_lufs_momentary[i].store(f32::NEG_INFINITY, Relaxed);
+                            self.shared.stem_lufs_shortterm[i].store(f32::NEG_INFINITY, Relaxed);
                         }
                     }
                 }
@@ -525,8 +535,12 @@ impl DeckAudioState {
         let wet_target = if wrekk_applies { wrekk_wet } else { 0.0 };
         let wet_coeff = 1.0 - (-1.0_f32 / (0.020 * sr)).exp();
 
-        // ── Per-stem peak tracking ────────────────────────────────────────
+        // ── Per-stem peak tracking + loudness scratch ─────────────────────
         let mut stem_peak = [0.0f32; N_STEMS];
+        for blk in self.stem_block.iter_mut() {
+            blk.clear();
+        }
+        let has_stems = buffers.stems.is_some();
 
         // ── Main render loop (per output frame) ───────────────────────────
         let mut frames_filled: usize = 0;
@@ -559,6 +573,9 @@ impl DeckAudioState {
                 for stem_idx in 0..N_STEMS {
                     let gain = gains[stem_idx];
                     if gain < 1e-5 {
+                        // Keep the loudness window time-aligned: silent frame.
+                        self.stem_block[stem_idx].push(0.0);
+                        self.stem_block[stem_idx].push(0.0);
                         continue;
                     }
                     let (l, r) = hermite_frame(&stems[stem_idx], src_i, frac, n_frames);
@@ -580,6 +597,8 @@ impl DeckAudioState {
                     let gr = pr;
                     buf[out_i * 2] += gl;
                     buf[out_i * 2 + 1] += gr;
+                    self.stem_block[stem_idx].push(gl);
+                    self.stem_block[stem_idx].push(gr);
                     let pk = gl.abs().max(gr.abs());
                     if pk > stem_peak[stem_idx] {
                         stem_peak[stem_idx] = pk;
@@ -643,6 +662,18 @@ impl DeckAudioState {
         let (m, st) = self.lufs.process(&buf[..filled]);
         self.shared.lufs_momentary.store(m, Relaxed);
         self.shared.lufs_shortterm.store(st, Relaxed);
+
+        // Per-stem K-weighted loudness (real BS.1770, post-gain/FX)
+        if has_stems {
+            for i in 0..N_STEMS {
+                if self.stem_block[i].is_empty() {
+                    continue;
+                }
+                let (sm, sst) = self.stem_lufs[i].process(&self.stem_block[i]);
+                self.shared.stem_lufs_momentary[i].store(sm, Relaxed);
+                self.shared.stem_lufs_shortterm[i].store(sst, Relaxed);
+            }
+        }
 
         // Spectrum
         let mono: Vec<f32> = buf[..filled]

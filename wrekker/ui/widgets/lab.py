@@ -1106,7 +1106,12 @@ class WrekkerLabWindow(QMainWindow):
             except Exception:
                 click_level = 65
         self._click.setValue(max(0, min(100, click_level)))
-        self._click.valueChanged.connect(self._on_metronome_changed)
+        # Rebuilding preview audio per slider step is expensive; debounce it.
+        self._click_debounce = QTimer(self)
+        self._click_debounce.setSingleShot(True)
+        self._click_debounce.setInterval(200)
+        self._click_debounce.timeout.connect(self._on_metronome_changed)
+        self._click.valueChanged.connect(lambda _v: self._click_debounce.start())
         self._click.setFixedWidth(90)
         toolbar.addWidget(self._click)
         self._pos_lbl = QLabel("0:00.00")
@@ -1589,7 +1594,19 @@ class WrekkerLabWindow(QMainWindow):
     def _set_position(self, pos_s: float) -> None:
         self._position_s = max(0.0, min(self._session.draft.duration_s, float(pos_s)))
         self._preview.seek(self._position_s)
-        self._refresh_all()
+        # Seeking changes no analysis data — skip the full refresh so scrubbing
+        # stays fluid and in-progress edits (e.g. a typed BPM) are not clobbered.
+        self._refresh_position()
+
+    def _refresh_position(self) -> None:
+        self._pos_lbl.setText(_fmt_time(self._position_s))
+        if self._quick_timeline.available:
+            self._quick_timeline.set_position(self._position_s)
+        else:
+            self._zoom.set_position(self._position_s)
+            self._overview.set_position(self._position_s)
+        if hasattr(self, "_lab_horizon"):
+            self._lab_horizon.set_position(self._position_s)
 
     def _on_source_changed(self, source: str) -> None:
         if source not in _SOURCE_LABELS:
@@ -1823,6 +1840,9 @@ class WrekkerLabWindow(QMainWindow):
         self._edit(lambda s: s.mark_verified())
 
     def _on_save(self) -> None:
+        if not self._session.dirty:
+            self.statusBar().showMessage("No unsaved LAB changes.", 4000)
+            return
         try:
             rev = self._session.save()
             s = self._session.draft
@@ -1856,12 +1876,41 @@ class WrekkerLabWindow(QMainWindow):
         super().closeEvent(ev)
 
     def keyPressEvent(self, ev) -> None:
+        focus = self.focusWidget()
+        in_editor = isinstance(focus, (QLineEdit, QTextEdit, QDoubleSpinBox, QComboBox))
         if ev.key() == Qt.Key.Key_Space and not ev.isAutoRepeat():
-            focus = self.focusWidget()
-            if isinstance(focus, (QLineEdit, QTextEdit, QDoubleSpinBox, QComboBox)):
+            if in_editor:
                 super().keyPressEvent(ev)
                 return
             self._on_play_pause()
             ev.accept()
             return
+        if ev.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right) and not in_editor:
+            direction = -1 if ev.key() == Qt.Key.Key_Left else 1
+            if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                # Fine nudge for grid verification: ±10 ms.
+                self._set_position(self._position_s + direction * 0.010)
+            else:
+                self._set_position(self._adjacent_beat(direction))
+            ev.accept()
+            return
         super().keyPressEvent(ev)
+
+    def _adjacent_beat(self, direction: int) -> float:
+        """Position of the next/previous beat relative to the playhead."""
+        beats = [
+            float(b) for b in (self._session.draft.active_beatgrid.get("beats") or [])
+            if isinstance(b, (int, float))
+        ]
+        eps = 1e-3
+        if beats:
+            if direction > 0:
+                idx = bisect.bisect_right(beats, self._position_s + eps)
+                if idx < len(beats):
+                    return beats[idx]
+            else:
+                idx = bisect.bisect_left(beats, self._position_s - eps) - 1
+                if idx >= 0:
+                    return beats[idx]
+        period = 60.0 / max(1.0, self._session.draft.active_bpm)
+        return self._position_s + direction * period

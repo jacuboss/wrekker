@@ -259,6 +259,7 @@ impl NativeEngine {
 
         let mut buf_a: Vec<f32> = Vec::new();
         let mut buf_b: Vec<f32> = Vec::new();
+        let mut master_lufs = lufs::KWeightedLUFS::new(sr, 256);
         let fs = sr as f32;
         let mut cf_prev    = 0.5_f32;
         let mut master_prev = 1.0_f32;
@@ -387,6 +388,11 @@ impl NativeEngine {
                         ((sum_ab / denom) as f32).clamp(-1.0, 1.0)
                     } else { 0.0 };
                     sm.phase_corr.store(corr, Ordering::Relaxed);
+
+                    // Master loudness (K-weighted, measured on the limited output)
+                    let (lm, lst) = master_lufs.process(data);
+                    sm.lufs_momentary.store(lm, Ordering::Relaxed);
+                    sm.lufs_shortterm.store(lst, Ordering::Relaxed);
 
                     // Publish master mix for MST CUE / hp_mix blending in HP stream.
                     if update_live_buf(&sm.live_buf, data) {
@@ -681,12 +687,34 @@ impl NativeEngine {
         self.shared_mixer.phase_corr.load(Ordering::Relaxed)
     }
 
+    /// Master-bus K-weighted loudness → (momentary_LUFS, short_term_LUFS).
+    fn get_master_lufs(&self) -> (f32, f32) {
+        (
+            self.shared_mixer.lufs_momentary.load(Ordering::Relaxed),
+            self.shared_mixer.lufs_shortterm.load(Ordering::Relaxed),
+        )
+    }
+
     /// Per-stem peak (decayed). 0.0–2.0 range.
     fn get_stem_peak(&self, deck_id: &str, stem_idx: usize) -> f32 {
         if stem_idx < N_STEMS {
             self.deck(deck_id).stem_peaks[stem_idx].load(Ordering::Relaxed)
         } else {
             0.0
+        }
+    }
+
+    /// Per-stem K-weighted loudness → (momentary_LUFS, short_term_LUFS).
+    /// NEG_INFINITY when no stems are loaded or the stem is silent.
+    fn get_stem_lufs(&self, deck_id: &str, stem_idx: usize) -> (f32, f32) {
+        if stem_idx < N_STEMS {
+            let d = self.deck(deck_id);
+            (
+                d.stem_lufs_momentary[stem_idx].load(Ordering::Relaxed),
+                d.stem_lufs_shortterm[stem_idx].load(Ordering::Relaxed),
+            )
+        } else {
+            (f32::NEG_INFINITY, f32::NEG_INFINITY)
         }
     }
 

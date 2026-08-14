@@ -181,20 +181,38 @@ class SMBShare:
         if not self.mount_point:
             raise SMBMountError("mount_point required for mount.cifs")
         self.mount_point.mkdir(parents=True, exist_ok=True)
-        options = [f"vers=3.0"]
-        if self.username:
-            options.append(f"username={self.username}")
-        if self.password:
-            options.append(f"password={self.password}")
-        if self.domain:
-            options.append(f"domain={self.domain}")
+        options = ["vers=3.0"]
+        # Credentials go through a 0600 temp file, never the command line —
+        # arguments are world-readable via /proc/<pid>/cmdline.
+        cred_path: Optional[Path] = None
+        if self.username or self.password or self.domain:
+            import tempfile
+            fd, name = tempfile.mkstemp(prefix="wrekker-smb-", suffix=".cred")
+            cred_path = Path(name)
+            lines = []
+            if self.username:
+                lines.append(f"username={self.username}")
+            if self.password:
+                lines.append(f"password={self.password}")
+            if self.domain:
+                lines.append(f"domain={self.domain}")
+            with os.fdopen(fd, "w") as fh:
+                fh.write("\n".join(lines) + "\n")
+            options.append(f"credentials={cred_path}")
         cmd = [
             "sudo", "mount", "-t", "cifs",
             f"//{self.host}/{self.share}",
             str(self.mount_point),
             "-o", ",".join(options),
         ]
-        result = subprocess.run(cmd, capture_output=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True)
+        finally:
+            if cred_path is not None:
+                try:
+                    cred_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         if result.returncode != 0:
             err = result.stderr.decode(errors="replace").strip()
             raise SMBMountError(f"mount.cifs failed: {err}")
@@ -216,6 +234,11 @@ def load_smb_config(config_path: Path = _CONFIG_PATH) -> dict[str, SMBShare]:
     """
     if not config_path.exists():
         return {}
+
+    try:
+        os.chmod(config_path, 0o600)   # tighten legacy files that predate this
+    except OSError:
+        pass
 
     cp = configparser.ConfigParser()
     cp.read(config_path)
@@ -265,6 +288,7 @@ def save_smb_config(
             del cp[section][key]
     with open(config_path, "w") as fh:
         cp.write(fh)
+    os.chmod(config_path, 0o600)   # contains credentials
 
 
 def write_smb_config_example(config_path: Path = _CONFIG_PATH) -> None:
@@ -284,3 +308,4 @@ def write_smb_config_example(config_path: Path = _CONFIG_PATH) -> None:
 # domain      =
 # mount_point = /mnt/music   ; leave blank to use GVFS auto-mount
 """)
+    os.chmod(config_path, 0o600)

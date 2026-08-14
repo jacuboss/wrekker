@@ -76,6 +76,11 @@ pub struct DeckShared {
     /// Per-stem RMS-like peak (decayed). Audio writes, Python polls.
     pub stem_peaks: [AtomicF32; N_STEMS],
 
+    /// Per-stem K-weighted loudness (post-gain/FX). Audio writes, Python polls.
+    /// NEG_INFINITY when the deck has no stems loaded or the stem is silent.
+    pub stem_lufs_momentary: [AtomicF32; N_STEMS],
+    pub stem_lufs_shortterm: [AtomicF32; N_STEMS],
+
     /// Recent post-EQ audio: LIVE_BUF_FRAMES frames, interleaved stereo f32.
     /// Audio thread writes with try_lock (skips if contended).
     pub live_buf: Mutex<Vec<f32>>,
@@ -116,6 +121,8 @@ impl DeckShared {
             lufs_shortterm: AtomicF32::new(f32::NEG_INFINITY),
             spectrum: std::array::from_fn(|_| AtomicF32::new(-96.0)),
             stem_peaks: std::array::from_fn(|_| AtomicF32::new(0.0)),
+            stem_lufs_momentary: std::array::from_fn(|_| AtomicF32::new(f32::NEG_INFINITY)),
+            stem_lufs_shortterm: std::array::from_fn(|_| AtomicF32::new(f32::NEG_INFINITY)),
             live_buf: Mutex::new(vec![0.0f32; LIVE_BUF_FRAMES * 2]),
             live_seq: AtomicU64::new(0),
             buffer_epoch: AtomicU64::new(0),
@@ -134,6 +141,9 @@ pub struct MixerShared {
     pub clip_l: AtomicBool,
     pub clip_r: AtomicBool,
     pub phase_corr: AtomicF32,
+    /// K-weighted loudness of the master output (post-limiter).
+    pub lufs_momentary: AtomicF32,
+    pub lufs_shortterm: AtomicF32,
 
     /// Recent master output: LIVE_BUF_FRAMES frames, interleaved stereo f32.
     pub live_buf: Mutex<Vec<f32>>,
@@ -161,6 +171,8 @@ impl MixerShared {
             clip_l: AtomicBool::new(false),
             clip_r: AtomicBool::new(false),
             phase_corr: AtomicF32::new(0.0),
+            lufs_momentary: AtomicF32::new(f32::NEG_INFINITY),
+            lufs_shortterm: AtomicF32::new(f32::NEG_INFINITY),
             live_buf: Mutex::new(vec![0.0f32; LIVE_BUF_FRAMES * 2]),
             live_seq: AtomicU64::new(0),
             cue_a: AtomicBool::new(false),

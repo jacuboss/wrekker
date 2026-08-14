@@ -38,18 +38,26 @@ def _wrk_id_for(source_path: str) -> str:
     return hashlib.sha256(source_path.encode()).hexdigest()
 
 
-def _inspect_wrk(wrk_path: Path) -> Optional[dict]:
+def _inspect_wrk(wrk_path: Path) -> "tuple[Optional[dict], bool]":
     """
-    Read only manifest.json from the .wrk ZIP.  Returns the parsed dict or None
-    on any error.  Does NOT decode any audio.
+    Read only manifest.json from the .wrk ZIP.  Does NOT decode any audio.
+
+    Returns (manifest, corrupt):
+      (dict, False)  — readable
+      (None, True)   — structurally corrupt (bad ZIP / missing or invalid manifest)
+      (None, False)  — transient I/O error (network share hiccup, permissions);
+                       the file must NOT be quarantined for this.
     """
     try:
         with zipfile.ZipFile(wrk_path, "r") as zf:
             with zf.open("manifest.json") as f:
-                return json.loads(f.read().decode("utf-8"))
+                return json.loads(f.read().decode("utf-8")), False
+    except (zipfile.BadZipFile, KeyError, json.JSONDecodeError) as exc:
+        log.warning("WrekkedScanner: corrupt .wrk %s — %s", wrk_path, exc)
+        return None, True
     except Exception as exc:
-        log.warning("WrekkedScanner: cannot read %s — %s", wrk_path, exc)
-        return None
+        log.warning("WrekkedScanner: cannot read %s (transient?) — %s", wrk_path, exc)
+        return None, False
 
 
 def _source_info(manifest: dict) -> tuple[str, str | None, int | None]:
@@ -125,8 +133,11 @@ class WrekkedScanner:
 
         # Enumerate .wrk files per set so we can report accurate totals
         set_wrks: list[tuple[Path, list[Path]]] = []
-        for set_dir in set_dirs:
-            wrks = [p for p in set_dir.iterdir() if p.is_file() and p.suffix.lower() == ".wrk"]
+        for set_dir in sorted(set_dirs, key=lambda d: d.name.lower()):
+            wrks = sorted(
+                (p for p in set_dir.iterdir() if p.is_file() and p.suffix.lower() == ".wrk"),
+                key=lambda p: p.name.lower(),
+            )
             if wrks:
                 set_wrks.append((set_dir, wrks))
 
@@ -147,7 +158,11 @@ class WrekkedScanner:
             )
 
             for position, wrk_path in enumerate(wrks):
-                registered = self._register_track(set_id, wrk_path, position)
+                try:
+                    registered = self._register_track(set_id, wrk_path, position)
+                except Exception as exc:
+                    log.warning("WrekkedScanner: failed to register %s — %s", wrk_path, exc)
+                    registered = False
                 if registered is None:
                     try:
                         self._quarantine_corrupt_wrk(wrk_path)
@@ -195,13 +210,13 @@ class WrekkedScanner:
         Register one .wrk.
 
         Returns:
-          - None if corrupt/unreadable
+          - None if structurally corrupt (caller quarantines)
           - True if the .wrk is readable but needs beatgrid schema-v2 upgrade
-          - False if readable and current
+          - False if readable and current, or temporarily unreadable
         """
-        manifest = _inspect_wrk(wrk_path)
+        manifest, corrupt = _inspect_wrk(wrk_path)
         if manifest is None:
-            return None
+            return None if corrupt else False
 
         # Derive wrk_id from the source_path recorded in the manifest when
         # available; fall back to hashing the wrk_path itself so offline tracks
@@ -218,9 +233,15 @@ class WrekkedScanner:
         meta = manifest.get("metadata", manifest)  # some wrks nest under "metadata"
         title      = meta.get("title", "") or wrk_path.stem
         artist     = meta.get("artist", "") or ""
-        duration_s = float(meta.get("duration_s", 0.0))
-        bpm_raw    = meta.get("bpm")
-        bpm        = float(bpm_raw) if bpm_raw is not None else None
+        try:
+            duration_s = float(meta.get("duration_s") or 0.0)
+        except (TypeError, ValueError):
+            duration_s = 0.0
+        try:
+            bpm_raw = meta.get("bpm")
+            bpm     = float(bpm_raw) if bpm_raw is not None else None
+        except (TypeError, ValueError):
+            bpm = None
         key        = meta.get("key") or None
 
         # Determine stems/wrk readiness from manifest contents list

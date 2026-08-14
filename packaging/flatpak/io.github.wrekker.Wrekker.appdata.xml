@@ -18,8 +18,8 @@
       <li>Rust/CPAL real-time audio engine</li>
     </ul>
   </description>
-  <url type="homepage">https://github.com/wrekker-dj/wrekker</url>
-  <url type="bugtracker">https://github.com/wrekker-dj/wrekker/issues</url>
+  <url type="homepage">https://github.com/jacuboss/wrekker</url>
+  <url type="bugtracker">https://github.com/jacuboss/wrekker/issues</url>
   <launchable type="desktop-id">io.github.wrekker.Wrekker.desktop</launchable>
   <releases>
     <release version="0.1.0-beta" date="2026-05-29"/>

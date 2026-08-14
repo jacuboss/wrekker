@@ -861,7 +861,12 @@ class DeckWidget(QWidget):
         if metrics:
             m  = metrics.lufs.momentary_lufs
             st = metrics.lufs.short_term_lufs
-            self._lufs_lbl.set_value(f"{m:.1f}M" if not math.isinf(m) else "—")
+            if math.isinf(m) and math.isinf(st):
+                self._lufs_lbl.set_value("—")
+            else:
+                m_txt  = f"{m:.1f}"  if not math.isinf(m)  else "—"
+                st_txt = f"{st:.1f}" if not math.isinf(st) else "—"
+                self._lufs_lbl.set_value(f"{m_txt}M {st_txt}S")
             self._lufs_bar.set_levels(m, st)
 
         # Spectral

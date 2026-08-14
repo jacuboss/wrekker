@@ -23,6 +23,7 @@ class LUFSMeterWidget(QWidget):
     _DB_MIN  = -40.0
     _DB_MAX  =   0.0
     _N_SEGS  =  20
+    _REF_DB  = -14.0   # club/streaming reference anchor drawn as a tick
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -76,6 +77,13 @@ class LUFSMeterWidget(QWidget):
                 p.fillRect(rect, dim)
             else:
                 p.fillRect(rect, raw)
+
+        # Reference tick at −14 LUFS: a fixed anchor so levels can be aimed
+        # consistently across tracks and sessions.
+        ref_y = h - int(_norm(self._REF_DB) * h)
+        ref = QColor(theme.WHITE)
+        ref.setAlphaF(0.75)
+        p.fillRect(QRectF(0, ref_y - 1, w, 2), ref)
 
         p.end()
 
