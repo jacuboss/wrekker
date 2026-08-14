@@ -24,7 +24,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config librubberband-dev libfuse2 python3.11-dev ffmpeg wget
+          sudo apt-get install -y build-essential pkg-config libasound2-dev librubberband-dev libfuse2 python3.11-dev ffmpeg wget
       - uses: dtolnay/rust-toolchain@stable
       - run: pip install maturin
       - name: Build AppImage
