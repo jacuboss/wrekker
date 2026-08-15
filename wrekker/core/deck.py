@@ -13,6 +13,7 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from statistics import median
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ __all__ = [
     "MARKER_MIN_CONFIDENCE",
     "STEM_NAMES",
     "STEM_GAIN_MAX",
+    "fill_beat_gaps",
 ]
 
 STEM_NAMES:     tuple[str, ...] = ("vocals", "drums", "bass", "other")
@@ -309,6 +311,67 @@ class PhraseMark:
     energy_level: float = 0.5
 
 
+# ─── beat-grid gap bridging ───────────────────────────────────────────────────
+
+# Beat detection drops out where a track has no percussion: a solo, a
+# breakdown, an ambient bridge. An interval longer than this multiple of the
+# track's measured beat period is read as such a dropout, not as one real
+# (absurdly slow) beat.
+BEAT_GAP_FACTOR: float = 1.75
+
+# Sanity cap: a pathological grid (two beats spanning a whole track) must not
+# synthesise an unbounded number of beats.
+_MAX_BRIDGE_BEATS: int = 4096
+
+
+def fill_beat_gaps(
+    beats: "tuple[float, ...] | list[float]",
+    fallback_bpm: float = 120.0,
+) -> tuple[float, ...]:
+    """
+    Return ``beats`` with detection dropouts bridged by extrapolated beats.
+
+    Every phase and tempo query treats consecutive entries as exactly one beat
+    apart, so a section with no detectable beats reads as a single very long
+    beat: phase ramps from 0 to 1 across the whole section — up to half a beat
+    of error, the worst case for the sync PLL — and local tempo collapses
+    toward zero. The follower chases a phantom tempo and sync is lost for the
+    length of the solo.
+
+    Each gap is divided evenly into the number of beats that fit at the
+    surrounding tempo. Both endpoints stay on their detected beats, so the
+    bridge rejoins the real grid exactly and any tempo drift across the gap is
+    spread over it instead of landing as a jump at the far edge.
+    """
+    if len(beats) < 2:
+        return tuple(float(b) for b in beats)
+
+    intervals = [b - a for a, b in zip(beats, beats[1:]) if b > a]
+    if not intervals:
+        return tuple(float(b) for b in beats)
+
+    period = median(intervals)
+    # Re-measure from the intervals that are not gaps, so a track riddled with
+    # dropouts still resolves its true beat period.
+    kept = [d for d in intervals if d <= period * BEAT_GAP_FACTOR]
+    if kept:
+        period = median(kept)
+    if period <= 0.0:
+        period = 60.0 / max(fallback_bpm, 1.0)
+
+    limit = period * BEAT_GAP_FACTOR
+    out: list[float] = [float(beats[0])]
+    for prev, nxt in zip(beats, beats[1:]):
+        span = nxt - prev
+        if span > limit:
+            n = int(round(span / period))
+            if 2 <= n <= _MAX_BRIDGE_BEATS:
+                step = span / n
+                out.extend(float(prev + step * k) for k in range(1, n))
+        out.append(float(nxt))
+    return tuple(out)
+
+
 @dataclass(frozen=True)
 class BeatGrid:
     """
@@ -341,6 +404,30 @@ class BeatGrid:
     bpm_min:       float | None = None
     bpm_max:       float | None = None
 
+    def __post_init__(self) -> None:
+        # Continuous grids used for every phase/tempo/phrase query. The raw
+        # `beats`/`downbeats` stay untouched as the record of what analysis
+        # actually detected (LAB edits and re-analysis work from those).
+        object.__setattr__(self, "_grid_beats", fill_beat_gaps(self.beats, self.bpm))
+        object.__setattr__(
+            self, "_grid_downbeats", fill_beat_gaps(self.downbeats, self.bpm / 4.0)
+        )
+
+    @property
+    def grid_beats(self) -> tuple[float, ...]:
+        """Beats with detection dropouts bridged — the grid sync runs on."""
+        return self._grid_beats
+
+    @property
+    def grid_downbeats(self) -> tuple[float, ...]:
+        """Downbeats with dropouts bridged, for bar and phrase alignment."""
+        return self._grid_downbeats
+
+    @property
+    def has_beat_gaps(self) -> bool:
+        """True when beat detection dropped out and the grid had to be bridged."""
+        return len(self._grid_beats) > len(self.beats)
+
     @property
     def beat_period_s(self) -> float:
         return 60.0 / max(self.bpm, 1.0)
@@ -354,7 +441,7 @@ class BeatGrid:
 
     def local_bpm_at(self, pos_s: float) -> float:
         """Local BPM at pos_s from inter-beat spacing; falls back to global BPM."""
-        b = self.beats
+        b = self.grid_beats
         if len(b) < 2:
             return self.bpm
         i = bisect.bisect_right(b, pos_s) - 1
@@ -366,7 +453,7 @@ class BeatGrid:
 
     def phase_at(self, pos_s: float) -> float:
         """Beat phase in [0.0, 1.0) at the given track position."""
-        b = self.beats
+        b = self.grid_beats
         if len(b) >= 2:
             i = bisect.bisect_right(b, pos_s) - 1
             if 0 <= i < len(b) - 1:
@@ -385,7 +472,7 @@ class BeatGrid:
         Return the position nearest to near_pos_s whose beat phase equals
         target_phase.  Result is always ≥ 0.0.
         """
-        b = self.beats
+        b = self.grid_beats
         if len(b) >= 2:
             i = bisect.bisect_right(b, near_pos_s) - 1
             best_pos  = None

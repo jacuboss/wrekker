@@ -56,7 +56,7 @@ class PhraseLockSync:
         """
         master_bg = master_deck.beatgrid
         slave_bg = slave_deck.beatgrid
-        if master_bg is None or slave_bg is None or not slave_bg.beats:
+        if master_bg is None or slave_bg is None or not slave_bg.grid_beats:
             return -1.0
 
         target_progress = self.phrase_progress_beats(master_deck)
@@ -69,10 +69,10 @@ class PhraseLockSync:
         near_pos = max(0.0, slave_deck.position_s)
         for point in points:
             progress = target_progress % point.length_beats
-            marker_idx = max(0, bisect.bisect_right(slave_bg.beats, point.position_s) - 1)
+            marker_idx = max(0, bisect.bisect_right(slave_bg.grid_beats, point.position_s) - 1)
             beat_idx = marker_idx + progress
-            if 0 <= beat_idx < len(slave_bg.beats):
-                candidate = float(slave_bg.beats[beat_idx])
+            if 0 <= beat_idx < len(slave_bg.grid_beats):
+                candidate = float(slave_bg.grid_beats[beat_idx])
             else:
                 candidate = point.position_s + progress * slave_bg.beat_period_s
             dist = abs(candidate - near_pos)
@@ -105,15 +105,15 @@ class PhraseLockSync:
     ) -> int:
         """Return current beat index inside the active phrase."""
         bg = deck.beatgrid
-        if bg is None or not bg.beats:
+        if bg is None or not bg.grid_beats:
             return 0
         pos = max(0.0, deck.position_s if position_s is None else position_s)
-        beat_idx = max(0, bisect.bisect_right(bg.beats, pos) - 1)
+        beat_idx = max(0, bisect.bisect_right(bg.grid_beats, pos) - 1)
         point = self._active_phrase_point(bg, pos)
         if point is None:
             phrase_len = 32
             return beat_idx % phrase_len
-        marker_idx = max(0, bisect.bisect_right(bg.beats, point.position_s) - 1)
+        marker_idx = max(0, bisect.bisect_right(bg.grid_beats, point.position_s) - 1)
         return (beat_idx - marker_idx) % point.length_beats
 
     def phrase_length_beats(
@@ -165,17 +165,17 @@ class PhraseLockSync:
                 for mark in bg.phrase_markers
             )
 
-        if bg.downbeats:
+        if bg.grid_downbeats:
             return tuple(
                 _PhrasePoint(position_s=float(pos), length_bars=8)
-                for idx, pos in enumerate(bg.downbeats)
+                for idx, pos in enumerate(bg.grid_downbeats)
                 if idx % 8 == 0
             )
 
-        if bg.beats:
+        if bg.grid_beats:
             return tuple(
                 _PhrasePoint(position_s=float(pos), length_bars=8)
-                for idx, pos in enumerate(bg.beats)
+                for idx, pos in enumerate(bg.grid_beats)
                 if idx % 32 == 0
             )
 
@@ -197,14 +197,14 @@ class PhraseLockSync:
         last: _PhrasePoint,
         pos: float,
     ) -> float:
-        if bg.beats:
-            beat_idx = max(0, bisect.bisect_right(bg.beats, last.position_s) - 1)
+        if bg.grid_beats:
+            beat_idx = max(0, bisect.bisect_right(bg.grid_beats, last.position_s) - 1)
             step = last.length_beats
             next_idx = beat_idx + step
-            while next_idx < len(bg.beats) and bg.beats[next_idx] <= pos + 1e-6:
+            while next_idx < len(bg.grid_beats) and bg.grid_beats[next_idx] <= pos + 1e-6:
                 next_idx += step
-            if next_idx < len(bg.beats):
-                return float(bg.beats[next_idx])
+            if next_idx < len(bg.grid_beats):
+                return float(bg.grid_beats[next_idx])
 
         phrase_s = last.length_beats * bg.beat_period_s
         n = max(1, int((pos - last.position_s) // phrase_s) + 1)
@@ -212,11 +212,11 @@ class PhraseLockSync:
 
     def _regular_phrase_boundary(self, bg: BeatGrid, pos: float, bars: int) -> float:
         length_beats = bars * 4
-        if bg.beats:
-            i = max(0, bisect.bisect_right(bg.beats, pos))
+        if bg.grid_beats:
+            i = max(0, bisect.bisect_right(bg.grid_beats, pos))
             next_i = ((i + length_beats - 1) // length_beats) * length_beats
-            if next_i < len(bg.beats):
-                return float(bg.beats[next_i])
+            if next_i < len(bg.grid_beats):
+                return float(bg.grid_beats[next_i])
 
         phrase_s = length_beats * bg.beat_period_s
         first = bg.first_beat_s

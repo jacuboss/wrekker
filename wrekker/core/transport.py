@@ -50,6 +50,7 @@ from wrekker.core.deck import (
     SpectralBands,
     StemState,
     TrackInfo,
+    fill_beat_gaps,
 )
 from wrekker.core.engine_v2 import AudioEngine
 from wrekker.stems.analyzer import StemAnalyzer
@@ -391,6 +392,17 @@ def _make_beatgrid(bg: "dict | None") -> "BeatGrid | None":
         bpm_min       = bg.get("bpm_min"),
         bpm_max       = bg.get("bpm_max"),
     )
+
+
+def _display_beats(beatgrid: "BeatGrid | None", raw: "dict | None") -> tuple[float, ...]:
+    """Beat positions for the waveform overlay.
+
+    Uses the same gap-bridged grid the sync engine runs on, so what the DJ
+    sees through a solo or breakdown is what the deck is actually locked to.
+    """
+    if beatgrid is not None:
+        return beatgrid.grid_beats
+    return tuple(raw.get("beats") or ()) if raw else ()
 
 
 def _track_hash(path: Path) -> str:
@@ -963,7 +975,7 @@ class Transport:
         pb.waveform = WaveformData(
             peaks       = meta.waveform_peaks,
             colors      = meta.waveform_colors,
-            beats       = tuple(meta.beatgrid.get("beats") or ()) if meta.beatgrid else (),
+            beats       = _display_beats(beatgrid, meta.beatgrid),
             stem_energy = meta.stem_energy if meta.has_stems else None,
             stem_horizon = getattr(meta, "stem_horizon", None) if meta.has_stems else None,
             zoom_peaks  = None,
@@ -1012,7 +1024,7 @@ class Transport:
         pb.waveform = WaveformData(
             peaks       = meta.waveform_peaks,
             colors      = meta.waveform_colors,
-            beats       = tuple(meta.beatgrid.get("beats") or ()) if meta.beatgrid else (),
+            beats       = _display_beats(beatgrid, meta.beatgrid),
             stem_energy = meta.stem_energy if meta.has_stems else None,
             stem_horizon = getattr(meta, "stem_horizon", None) if meta.has_stems else None,
             zoom_peaks  = z_peaks,
@@ -1322,7 +1334,7 @@ class Transport:
             pb.waveform = WaveformData(
                 peaks       = old_wf.peaks,
                 colors      = old_wf.colors,
-                beats       = beats,
+                beats       = fill_beat_gaps(beats, bpm or 120.0),
                 stem_energy = old_wf.stem_energy,
                 stem_horizon = old_wf.stem_horizon,
                 zoom_peaks  = old_wf.zoom_peaks,
