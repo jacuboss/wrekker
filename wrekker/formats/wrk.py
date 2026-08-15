@@ -62,7 +62,7 @@ __all__ = [
 ]
 
 WRK_VERSION     = 1
-WREKKER_VERSION = "0.1.0"
+WREKKER_VERSION = "0.1.1"
 STEM_NAMES      = ("vocals", "drums", "bass", "other")
 
 

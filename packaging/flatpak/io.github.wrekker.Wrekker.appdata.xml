@@ -27,6 +27,11 @@
   <url type="bugtracker">https://github.com/jacuboss/wrekker/issues</url>
   <launchable type="desktop-id">io.github.wrekker.Wrekker.desktop</launchable>
   <releases>
+    <release version="0.1.1-beta" date="2026-08-15">
+      <description>
+        <p>Keeps sync locked through solos and breakdowns where beat detection drops out, and fixes startup on distributions other than the build host.</p>
+      </description>
+    </release>
     <release version="0.1.0-beta" date="2026-05-29"/>
   </releases>
   <content_rating type="oars-1.1"/>

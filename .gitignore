@@ -26,7 +26,7 @@ build/
 *.flatpak
 Wrekker-Setup-*.exe
 Wrekker.AppDir/
-appimagetool-*.AppImage
+appimagetool-*.AppImage*
 python-embed.zip
 rubberband-windows.zip
 rubberband-tmp/

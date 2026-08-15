@@ -39,7 +39,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/jacuboss/wrekker
-        tag: "v0.1.0-beta"
+        tag: "v0.1.1-beta"
 
   - name: wrekker
     buildsystem: simple
@@ -51,7 +51,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/jacuboss/wrekker
-        tag: "v0.1.0-beta"
+        tag: "v0.1.1-beta"
 
   - name: wrekker-launcher
     buildsystem: simple
@@ -60,4 +60,4 @@ modules:
     sources:
       - type: git
         url: https://github.com/jacuboss/wrekker
-        tag: "v0.1.0-beta"
+        tag: "v0.1.1-beta"

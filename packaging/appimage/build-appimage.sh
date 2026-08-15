@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION="${1:-0.1.0-beta}"
+VERSION="${1:-0.1.1-beta}"
 ARCH="x86_64"
 APPDIR="Wrekker.AppDir"
 PYTHON_VERSION="3.11.9"
@@ -126,6 +126,7 @@ fi
 ln -sf usr/share/applications/io.github.wrekker.Wrekker.desktop \
   "${APPDIR}/io.github.wrekker.Wrekker.desktop"
 
-wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+wget -q -O appimagetool-x86_64.AppImage \
+  "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
 chmod +x appimagetool-x86_64.AppImage
 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool-x86_64.AppImage "${APPDIR}" "Wrekker-${VERSION}-${ARCH}.AppImage"

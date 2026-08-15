@@ -106,3 +106,20 @@ def test_phrase_detection(tmp_path):
     assert grid.phrase_markers
     assert grid.phrase_markers[0].phrase_length in (8, 16)
     assert grid.phrase_markers[0].position_sec == 0.0
+
+
+def test_phrase_markers_stay_on_bars_when_detection_drops_out(tmp_path) -> None:
+    # 120 BPM: a beat every 0.5 s, a bar every 2 s. The detector finds no
+    # downbeats between 16 s and 32 s (an eight-bar solo with no percussion).
+    beats = [round(i * 0.5, 6) for i in range(129)]
+    bars = [round(i * 2.0, 6) for i in range(33)]
+    gapped = bars[:8] + bars[16:]
+    audio, sr = _write_audio(tmp_path / "solo.wav", duration_s=64.0)
+
+    grid = _tracker_with(beats, gapped).analyze_audio(audio, sr)
+
+    # Stored analysis keeps exactly what was detected …
+    assert grid.downbeats == gapped
+    # … while phrases land on real bar positions every 8 bars (16 s).
+    positions = [m.position_sec for m in grid.phrase_markers]
+    assert positions[:3] == [0.0, 16.0, 32.0]

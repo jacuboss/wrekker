@@ -259,10 +259,17 @@ class BeatTracker:
         downbeats: list[float],
         beats: list[float],
     ) -> list[PhraseMark]:
+        # Phrases are counted in bars, so they have to be measured on a
+        # continuous grid: a section the detector found no beats in would
+        # otherwise shift every later phrase by the number of missing bars.
+        # Only these derived positions are bridged — the stored beats and
+        # downbeats stay exactly as detected.
+        from wrekker.core.deck import fill_beat_gaps
+
         if downbeats:
-            bar_starts = downbeats
+            bar_starts = list(fill_beat_gaps(downbeats))
         else:
-            bar_starts = beats[::4]
+            bar_starts = list(fill_beat_gaps(beats))[::4]
         if not bar_starts:
             return []
 

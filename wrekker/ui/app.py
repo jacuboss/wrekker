@@ -45,7 +45,7 @@ def launch(
 ) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Wrekker")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion("0.1.1")
     if LOGO_PATH.exists():
         app.setWindowIcon(QIcon(str(LOGO_PATH)))
     app.setStyleSheet(theme.GLOBAL_SS)
