@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>io.github.wrekker.Wrekker</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
   <name>Wrekker</name>
+  <developer id="io.github.jacuboss">
+    <name>Wrekker contributors</name>
+  </developer>
   <summary>Stem-native DJ software for Linux</summary>
   <description>
     <p>

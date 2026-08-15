@@ -22,7 +22,12 @@ PYTHON="${APPDIR}/usr/python/bin/python3.11"
 "${PYTHON}" -m pip install PyQt6 librosa soundfile numpy scipy sounddevice mutagen mido python-rtmidi structlog rich
 
 cd wrekker/engine_rs
-maturin build --release --interpreter "../../${PYTHON}" --out /tmp/wrekker-wheels
+# --compatibility linux: skip the manylinux repair. It vendors libasound into
+# the wheel, and a foreign libasound carries its build distro's ALSA plugin
+# paths — on other distros snd_pcm_open then fails (no PipeWire/Pulse plugin).
+# libasound must always come from the host; rubberband/samplerate are bundled
+# into AppDir/usr/lib below instead.
+maturin build --release --compatibility linux --interpreter "../../${PYTHON}" --out /tmp/wrekker-wheels
 cd ../..
 "${PYTHON}" -m pip install /tmp/wrekker-wheels/wrekker_engine-*.whl
 
@@ -31,6 +36,9 @@ cd ../..
 cp /usr/lib/librubberband.so* "${APPDIR}/usr/lib/" 2>/dev/null || \
 cp /usr/lib/x86_64-linux-gnu/librubberband.so* "${APPDIR}/usr/lib/" 2>/dev/null || \
   echo "WARNING: librubberband not found; AppImage may require system librubberband"
+cp /usr/lib/libsamplerate.so* "${APPDIR}/usr/lib/" 2>/dev/null || \
+cp /usr/lib/x86_64-linux-gnu/libsamplerate.so* "${APPDIR}/usr/lib/" 2>/dev/null || \
+  echo "WARNING: libsamplerate not found; AppImage may require system libsamplerate"
 
 cat > "${APPDIR}/AppRun" << 'EOF'
 #!/bin/bash
@@ -39,8 +47,8 @@ export PATH="${HERE}/usr/python/bin:${PATH}"
 export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="${HERE}/usr/python/lib/python3.11/site-packages:${PYTHONPATH:-}"
 export WREKKER_MODELS_PATH="${HOME}/.local/share/wrekker/models"
-export WREKKER_PYTHON_PACKAGES_PATH="${HOME}/.local/share/wrekker/python/site-packages"
-export PYTHONPATH="${WREKKER_PYTHON_PACKAGES_PATH}:${PYTHONPATH}"
+# Wizard-installed packages: resolved per interpreter version by
+# wrekker.config.paths.python_packages_dir() — do not override it here.
 exec "${HERE}/usr/python/bin/python3.11" -m wrekker.ui.app "$@"
 EOF
 chmod +x "${APPDIR}/AppRun"
@@ -56,10 +64,10 @@ Categories=AudioVideo;Audio;
 EOF
 
 if [ -f packaging/flatpak/io.github.wrekker.Wrekker.appdata.xml ]; then
+  # Exactly one metainfo file, named after the AppStream component id —
+  # appstreamcli flags any other filename and appimagetool aborts on it.
   cp packaging/flatpak/io.github.wrekker.Wrekker.appdata.xml \
     "${APPDIR}/usr/share/metainfo/io.github.wrekker.Wrekker.appdata.xml"
-  cp packaging/flatpak/io.github.wrekker.Wrekker.appdata.xml \
-    "${APPDIR}/usr/share/metainfo/wrekker.appdata.xml"
 fi
 
 if [ -f assets/icon-256.png ]; then
@@ -115,7 +123,8 @@ static char * wrekker_xpm[] = {
 };""")
 PY
 fi
-ln -sf usr/share/applications/io.github.wrekker.Wrekker.desktop "${APPDIR}/wrekker.desktop"
+ln -sf usr/share/applications/io.github.wrekker.Wrekker.desktop \
+  "${APPDIR}/io.github.wrekker.Wrekker.desktop"
 
 wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
 chmod +x appimagetool-x86_64.AppImage

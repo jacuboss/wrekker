@@ -53,10 +53,28 @@ def models_dir() -> Path:
 
 
 def python_packages_dir() -> Path:
-    """Persistent user site used by the AppImage first-time setup wizard."""
+    """Persistent user site used by the AppImage first-time setup wizard.
+
+    Scoped per interpreter version (cp311, cp313, …): compiled wheels installed
+    by one Python must never be importable from another — an unversioned dir
+    shadowed e.g. a conda numpy with the AppImage's cp311 build and broke it.
+    """
     override = os.environ.get("WREKKER_PYTHON_PACKAGES_PATH")
-    p = Path(override).expanduser() if override else data_dir() / "python" / "site-packages"
-    return _ensure_dir(p)
+    if override:
+        return _ensure_dir(Path(override).expanduser())
+    tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    versioned = data_dir() / "python" / tag / "site-packages"
+    if not versioned.exists():
+        # The legacy unversioned dir was only ever populated by the py3.11
+        # AppImage; keep using it there so AI components aren't re-downloaded.
+        legacy = data_dir() / "python" / "site-packages"
+        if sys.version_info[:2] == (3, 11) and legacy.is_dir():
+            try:
+                if any(legacy.iterdir()):
+                    return legacy
+            except OSError:
+                pass
+    return _ensure_dir(versioned)
 
 
 def library_dir() -> Path:
